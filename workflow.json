@@ -1,0 +1,109 @@
+{
+  "meta": { "instanceId": "placeholder" },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "2",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "path": "doc-classify",
+        "httpMethod": "POST",
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0002-0002-0002-000000000002",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst text = body.text || body.content || '';\nconst filename = body.filename || 'document.txt';\n\nif (!text) {\n  throw new Error('No text content provided. Send JSON with a \"text\" field.');\n}\n\nconst truncated = text.length > 3000 ? text.substring(0, 3000) + '...' : text;\n\nreturn [{ json: { text: truncated, filename, char_count: text.length } }];"
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Classify with OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer YOUR_OPENAI_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "gpt-4o-mini",
+          "max_tokens": 500,
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a document classifier. Analyze the given text and respond ONLY in JSON format with these fields:\n- category: one of [Invoice, Contract, Resume, Report, Email, Other]\n- confidence: high / medium / low\n- summary: one sentence summary of the document\n- key_entities: array of up to 3 important names, dates, or numbers found in the text\nDo not include any text outside the JSON object."
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.text }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c3d4e5f6-0004-0004-0004-000000000004",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 0],
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst rawContent = response.choices?.[0]?.message?.content || '{}';\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  parsed = { error: 'Failed to parse AI response', raw: rawContent };\n}\n\nconst filename = $('Extract Text').first().json.filename;\nconst charCount = $('Extract Text').first().json.char_count;\n\nreturn [{\n  json: {\n    filename,\n    char_count: charCount,\n    category: parsed.category || 'Unknown',\n    confidence: parsed.confidence || 'low',\n    summary: parsed.summary || '',\n    key_entities: parsed.key_entities || [],\n    processed_at: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "c3d4e5f6-0005-0005-0005-000000000005",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Extract Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [{ "node": "Classify with OpenAI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify with OpenAI": {
+      "main": [
+        [{ "node": "Format Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Result": {
+      "main": [
+        [{ "node": "Return Result", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
