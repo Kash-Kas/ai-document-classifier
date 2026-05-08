@@ -417,7 +417,9 @@
 
         if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
-        const data = await response.json();
+        let data = await response.json();
+      // n8n returns array sometimes
+        if (Array.isArray(data)) data = data[0];
         showResult(data);
       } catch (err) {
         showError("Could not connect to the classification service. Please try again. (" + err.message + ")");
